@@ -1,0 +1,1632 @@
+---
+title: "Cora 16S Analysis CM2021_3 Lettuce Project, Roots"
+output: html_notebook
+start date: "January 6, 2022"
+output:
+  html_document:
+  df_print: paged
+
+``{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+ 
+
+```{r}
+
+```
+``{r install packages}
+###
+
+install.packages("ape",repos="https://cloud.r-project.org",quiet=TRUE)
+
+
+if (!requireNamespace("BiocManager", quietly = TRUE))
+  install.packages("BiocManager")
+
+BiocManager::install("dada2")
+
+
+if (!requireNamespace("BiocManager", quietly = TRUE))
+  install.packages("BiocManager")
+
+BiocManager::install("ShortRead")##
+
+if (!requireNamespace("BiocManager", quietly = TRUE))
+  install.packages("BiocManager")
+
+BiocManager::install("Biostrings")##
+
+if (!requireNamespace("BiocManager", quietly = TRUE))
+  install.packages("BiocManager")
+
+BiocManager::install("phyloseq")
+
+# Install
+install.packages("wesanderson")
+# Load
+
+if (!requireNamespace("BiocManager", quietly = TRUE))
+  install.packages("BiocManager")
+
+BiocManager::install("DESeq2")
+
+devtools::install_github("karthik/wesanderson")
+
+install.packages("devtools")
+library("devtools")
+source("https://raw.githubusercontent.com/joey711/phyloseq/master/inst/scripts/installer.R",
+       local = TRUE)
+install_phyloseq(branch = "devel")
+install_phyloseq(branch = "github")
+install_github("phyloseq/joey711")
+
+browseVignettes("phyloseq")
+##
+```
+
+```{r load packages}
+library(dada2)
+library(ShortRead)
+library(Biostrings)
+library(phyloseq)
+library(ggplot2)
+library(cowplot)
+library(wesanderson)
+library(DESeq2)
+library(vegan)
+library(tidyr)
+packageVersion("cowplot")
+packageVersion("ape")
+```
+
+library(dada2)
+path <- "C:/Users/csm15105work/Desktop/Roots_16S"
+fnFs <- sort(list.files(path, pattern="_R1_001.fastq", full.names = TRUE))
+fnRs <- sort(list.files(path, pattern="_R2_001.fastq", full.names = TRUE))
+sample.names <- sapply(strsplit(basename(fnFs), "_"), `[`, 1)
+plotQualityProfile(fnFs[1:2])
+plotQualityProfile(fnRs[1:2])
+filtFs <- file.path(path, "filtered", paste0(sample.names, "_F_filt.fastq.gz"))
+filtRs <- file.path(path, "filtered", paste0(sample.names, "_R_filt.fastq.gz"))
+names(filtFs) <- sample.names
+names(filtRs) <- sample.names
+out <- filterAndTrim(fnFs, filtFs, fnRs, filtRs, truncLen=c(240,160),
+                     maxN=0, maxEE=c(2,2), truncQ=2, rm.phix=TRUE,
+                     compress=TRUE, multithread=FALSE)
+head(out)
+# On Windows set multithread=FALSE
+
+errF <- learnErrors(filtFs, multithread=TRUE)
+errR <- learnErrors(filtRs, multithread=TRUE)
+plotErrors(errF, nominalQ=TRUE)
+dadaFs <- dada(filtFs, err=errF, multithread=TRUE)
+dadaRs <- dada(filtRs, err=errR, multithread=TRUE)
+dadaFs[[1]]
+mergers <- mergePairs(dadaFs, filtFs, dadaRs, filtRs, verbose=TRUE)
+head(mergers[[1]])
+
+seqtab <- makeSequenceTable(mergers)
+dim(seqtab)
+table(nchar(getSequences(seqtab)))
+seqtab.nochim <- removeBimeraDenovo(seqtab, method="consensus", multithread=TRUE, verbose=TRUE)
+dim(seqtab.nochim)
+sum(seqtab.nochim)/sum(seqtab)
+getN <- function(x) sum(getUniques(x))
+track <- cbind(out, sapply(dadaFs, getN), sapply(dadaRs, getN), sapply(mergers, getN), rowSums(seqtab.nochim))
+# If processing a single sample, remove the sapply calls: e.g. replace sapply(dadaFs, getN) with getN(dadaFs)
+colnames(track) <- c("input", "filtered", "denoisedF", "denoisedR", "merged", "nonchim")
+rownames(track) <- sample.names
+head
+
+write.csv (track, file= 'track_root.csv')
+
+taxa <- assignTaxonomy(seqtab.nochim, "C:/Users/csm15105work/Desktop/Roots_16S/silva_nr_v138_train_set.fa", multithread=TRUE)
+taxa <- addSpecies(taxa, "C:/Users/csm15105work/Desktop/Roots_16S/silva_species_assignment_v138.fa")
+taxa.print <- taxa # Removing sequence rownames for display only
+rownames(taxa.print) <- NULL
+head(taxa.print)
+library(phyloseq); packageVersion("phyloseq")
+
+##metadata<-read.table("Lettuce.csv", sep=",", header=TRUE, row.names=c(1))##
+
+track
+seqtab.nochim
+write.csv(seqtab.nochim, "C:/Users/csm15105work/Desktop/Roots_16S/countseq16S_root.csv")
+
+setwd("C:/Users/csmcg/OneDrive/Desktop/Root_16S")
+
+seqtab.nochim_root <- read.csv("countseq16S_Roots.csv", row.names = 1)
+seqtab.nochim_root <- as.matrix(seqtab.nochim_root)
+
+save(taxa, file = "taxa.RData")
+save(taxa.print, file = "taxa.print.RData")
+
+## us this to load the RData files I genereated with the unite annotations
+load("taxa.RData")
+load("taxa.print.RData")
+```
+
+```{r rename asvs}
+asv_seqs <- colnames(seqtab.nochim_root)
+asv_headers <- vector(dim(seqtab.nochim_root)[2], mode="character")
+
+for (i in 1:dim(seqtab.nochim_root)[2]) {
+  asv_headers[i] <- paste(">ASV", i, sep="_")
+}
+
+# making and writing out a fasta of our final ASV seqs:
+asv_fasta <- c(rbind(asv_headers, asv_seqs))
+write(asv_fasta, "ASVs_root.fa")
+
+# count table:
+asv_tab <- t(seqtab.nochim_root)
+row.names(asv_tab) <- sub(">", "", asv_headers)
+# write.table(asv_tab, "ASVs_counts2.tsv", sep="\t", quote=F, col.names=NA)
+
+# tax table:
+asv_tax <- taxa
+row.names(asv_tax) <- sub(">", "", asv_headers)
+# write.table(asv_tax, "ASVs_taxonomy.tsv", sep="\t", quote=F, col.names=NA)
+
+
+```
+write(track, "track_root.csv")
+```{r make phyloseq object} ##Metadata##
+samples.out_root <- rownames(seqtab.nochim_root)
+samples_root <- c("ROOTx2aC0","ROOTx2bC0","ROOTx2cC0","ROOTx4aC0","ROOTx4bC0","ROOTx4cC0","ROOTx6aC0","ROOTx6bC0","ROOTx6cC0","ROOTxR13C1","ROOTxR13C2","ROOTxR13C3","ROOTxR13C4","ROOTxR13C5","ROOTxR14C1","ROOTxR14C2","ROOTxR14C3","ROOTxR14C4","ROOTxR14C5","ROOTxR20C1","ROOTxR20C2","ROOTxR20C3","ROOTxR20C4","ROOTxR20C5","ROOTxR7C1","ROOTxR7C2","ROOTxR7C3","ROOTxR7C4","ROOTxR7C5","ROOTxR9C1","ROOTxR9C2","ROOTxR9C3","ROOTxR9C4","ROOTxR9C5","ROOTxRP11C1","ROOTxRP11C2","ROOTxRP11C3","ROOTxRP11C4","ROOTxRP11C5","ROOTxRP12C1","ROOTxRP12C2","ROOTxRP12C3","ROOTxRP12C4","ROOTxRP12C5","ROOTxRP16C1","ROOTxRP16C2","ROOTxRP16C3","ROOTxRP16C4","ROOTxRP16C5","ROOTxRP18C1","ROOTxRP18C2","ROOTxRP18C3","ROOTxRP18C4","ROOTxRP18C5","ROOTxRP5C1","ROOTxRP5C2","ROOTxRP5C3","ROOTxRP5C4","ROOTxRP5C5","ROOTxS19C1","ROOTxS19C2","ROOTxS19C3","ROOTxS19C4","ROOTxS19C5","ROOTxS2C1","ROOTxS2C2","ROOTxS2C3","ROOTxS2C4","ROOTxS2C5","ROOTxS3C1","ROOTxS3C2","ROOTxS3C3","ROOTxS3C4","ROOTxS3C5","ROOTxS6C1","ROOTxS6C2","ROOTxS6C3","ROOTxS6C4","ROOTxS6C5","ROOTxS8C1","ROOTxS8C2","ROOTxS8C3","ROOTxS8C4","ROOTxS8C5","ROOTxSP10C1","ROOTxSP10C2","ROOTxSP10C3","ROOTxSP10C4","ROOTxSP10C5","ROOTxSP15C1","ROOTxSP15C2","ROOTxSP15C3","ROOTxSP15C4","ROOTxSP15C5","ROOTxSP17C1","ROOTxSP17C2","ROOTxSP17C3","ROOTxSP17C4","ROOTxSP17C5","ROOTxSP1C1","ROOTxSP1C2","ROOTxSP1C3","ROOTxSP1C4","ROOTxSP1C5","ROOTxSP4C1","ROOTxSP4C2","ROOTxSP4C3","ROOTxSP4C4","ROOTxSP4C5")
+
+
+
+Treatment <- c("0Cycle 0","0Cycle 0","0Cycle 0","0Cycle 0","0Cycle 0","0Cycle 0","0Cycle 0","0Cycle 0","0Cycle 0","Non-autoclaved","Non-autoclaved","Non-autoclaved","Non-autoclaved","Non-autoclaved","Non-autoclaved","Non-autoclaved","Non-autoclaved","Non-autoclaved","Non-autoclaved","Non-autoclaved","Non-autoclaved","Non-autoclaved","Non-autoclaved","Non-autoclaved","Non-autoclaved","Non-autoclaved","Non-autoclaved","Non-autoclaved","Non-autoclaved","Non-autoclaved","Non-autoclaved","Non-autoclaved","Non-autoclaved","Non-autoclaved","Non-autoclaved + P","Non-autoclaved + P","Non-autoclaved + P","Non-autoclaved + P","Non-autoclaved + P","Non-autoclaved + P","Non-autoclaved + P","Non-autoclaved + P","Non-autoclaved + P","Non-autoclaved + P","Non-autoclaved + P","Non-autoclaved + P","Non-autoclaved + P","Non-autoclaved + P","Non-autoclaved + P","Non-autoclaved + P","Non-autoclaved + P","Non-autoclaved + P","Non-autoclaved + P","Non-autoclaved + P","Non-autoclaved + P","Non-autoclaved + P","Non-autoclaved + P","Non-autoclaved + P","Non-autoclaved + P","Autoclaved","Autoclaved","Autoclaved","Autoclaved","Autoclaved","Autoclaved","Autoclaved","Autoclaved","Autoclaved","Autoclaved","Autoclaved","Autoclaved","Autoclaved","Autoclaved","Autoclaved","Autoclaved","Autoclaved","Autoclaved","Autoclaved","Autoclaved","Autoclaved","Autoclaved","Autoclaved","Autoclaved",
+"Autoclaved","Autoclaved + P","Autoclaved + P","Autoclaved + P","Autoclaved + P","Autoclaved + P","Autoclaved + P","Autoclaved + P","Autoclaved + P","Autoclaved + P","Autoclaved + P","Autoclaved + P","Autoclaved + P","Autoclaved + P","Autoclaved + P","Autoclaved + P","Autoclaved + P","Autoclaved + P","Autoclaved + P","Autoclaved + P","Autoclaved + P","Autoclaved + P","Autoclaved + P","Autoclaved + P","Autoclaved + P","Autoclaved + P")
+
+
+Solution <- c("0Cycle 0","0Cycle 0","0Cycle 0","0Cycle 0","0Cycle 0","0Cycle 0","0Cycle 0","0Cycle 0","0Cycle 0","Non-autoclaved","Non-autoclaved","Non-autoclaved","Non-autoclaved","Non-autoclaved","Non-autoclaved","Non-autoclaved","Non-autoclaved","Non-autoclaved","Non-autoclaved","Non-autoclaved","Non-autoclaved","Non-autoclaved","Non-autoclaved","Non-autoclaved","Non-autoclaved","Non-autoclaved","Non-autoclaved","Non-autoclaved","Non-autoclaved","Non-autoclaved","Non-autoclaved","Non-autoclaved","Non-autoclaved","Non-autoclaved","Non-autoclaved","Non-autoclaved","Non-autoclaved","Non-autoclaved","Non-autoclaved","Non-autoclaved","Non-autoclaved","Non-autoclaved","Non-autoclaved","Non-autoclaved","Non-autoclaved","Non-autoclaved","Non-autoclaved","Non-autoclaved","Non-autoclaved","Non-autoclaved","Non-autoclaved","Non-autoclaved","Non-autoclaved","Non-autoclaved","Non-autoclaved","Non-autoclaved","Non-autoclaved","Non-autoclaved","Non-autoclaved","Autoclaved","Autoclaved","Autoclaved","Autoclaved","Autoclaved","Autoclaved","Autoclaved","Autoclaved","Autoclaved","Autoclaved","Autoclaved","Autoclaved","Autoclaved","Autoclaved","Autoclaved","Autoclaved","Autoclaved","Autoclaved","Autoclaved","Autoclaved","Autoclaved","Autoclaved","Autoclaved","Autoclaved","Autoclaved","Autoclaved","Autoclaved","Autoclaved","Autoclaved","Autoclaved","Autoclaved","Autoclaved","Autoclaved","Autoclaved","Autoclaved","Autoclaved","Autoclaved","Autoclaved","Autoclaved","Autoclaved","Autoclaved","Autoclaved","Autoclaved","Autoclaved","Autoclaved","Autoclaved","Autoclaved","Autoclaved","Autoclaved","Autoclaved")
+
+
+Pathogen <- c("No Pythium","No Pythium","No Pythium","No Pythium","No Pythium","No Pythium","No Pythium","No Pythium","No Pythium","No Pythium","No Pythium","No Pythium","No Pythium","No Pythium","No Pythium","No Pythium","No Pythium","No Pythium","No Pythium","No Pythium","No Pythium","No Pythium","No Pythium","No Pythium","No Pythium","No Pythium","No Pythium","No Pythium","No Pythium","No Pythium","No Pythium","No Pythium","No Pythium","No Pythium","Pythium","Pythium","Pythium","Pythium","Pythium","Pythium","Pythium","Pythium","Pythium","Pythium","Pythium","Pythium","Pythium","Pythium","Pythium","Pythium","Pythium","Pythium","Pythium","Pythium","Pythium","Pythium","Pythium","Pythium","Pythium","No Pythium","No Pythium","No Pythium","No Pythium","No Pythium","No Pythium","No Pythium","No Pythium","No Pythium","No Pythium","No Pythium","No Pythium","No Pythium","No Pythium","No Pythium","No Pythium","No Pythium","No Pythium","No Pythium","No Pythium","No Pythium","No Pythium","No Pythium","No Pythium",
+"No Pythium","Pythium","Pythium","Pythium","Pythium","Pythium","Pythium","Pythium","Pythium","Pythium","Pythium","Pythium","Pythium","Pythium","Pythium","Pythium","Pythium","Pythium","Pythium","Pythium","Pythium","Pythium","Pythium","Pythium","Pythium","Pythium")
+
+
+Cycle <- c("0","0","0","0","0","0","0","0","0","1","2","3","4","5","1","2","3","4","5","1","2","3","4","5","1","2","3","4","5","1","2","3","4","5","1","2","3","4","5","1","2","3","4","5","1","2","3","4","5","1","2","3","4","5","1","2","3","4","5","1","2","3","4","5","1","2","3","4","5","1","2","3","4","5","1","2","3","4","5","1","2","3","4","5","1","2","3","4","5","1","2","3","4","5","1","2","3","4","5","1","2","3","4","5","1","2","3","4","5")
+
+
+samdf_root <- data.frame(merge= samples_root, Treatment= Treatment, Solution=Solution, Pathogen= Pathogen, Cycle= Cycle)
+# write.table(samdf_root, "samdf_root.txt", quote = FALSE, row.names = FALSE)
+rownames(samdf_root) <- samples.out_root
+
+ps_root <- phyloseq(otu_table(seqtab.nochim_root, taxa_are_rows=FALSE),
+                   sample_data(samdf_root),
+                   tax_table(taxa))
+ps_root <- prune_samples(sample_names(ps_root) != "Mock", ps_root) # Remove mock sample
+ps_root
+``
+
+#####Correlations#####
+
+library(stringr)
+library(plyr)
+library(reshape2)
+library(doBy)
+library(microbiome)
+library(ggpubr)
+library(corrplot)
+library(Hmisc)
+library(igraph)
+library(DAtest)
+library(dplyr)
+
+setwd("C:/Users/csmcg/OneDrive/Desktop/Root_16S")
+setwd("C:/Users/csmcg/OneDrive/Desktop/Reused_data")
+
+ps_root_new<-ps_root
+tax_table(ps_root_new)<- tax_table(ps_root_new)[,-6]
+
+##transform asv table to relative for 16S##
+ps_root.re.genus <- ps_root %>%
+  aggregate_taxa(level= "Genus") %>%
+  transform(transform = "compositional")
+taxa_names(ps_root.re.genus) <- tax_table(ps_root.re.genus)[,6]
+
+
+save(samples_root, file = "samples_root.RData")
+
+
+##ASV filtering##
+com.root.genus <- preDA(ps_root.re.genus, min.samples= 0.3*length(sample_names(ps_root.re.genus)))
+
+root_otuTf <- data.frame(t(otu_table(com.root.genus)))
+root_otuTf$sample <- sample_names(com.root.genus)$abcno
+root_otuTf <- root_otuTf[,which(colnames(root_otuTf) !="Others")]
+
+##Combine the two datasets for calculating the correlation##
+dim(PCR_otuTf_root)
+dim(root_otuTf)
+
+
+write.csv(root_otuTf, "C:/Users/csmcg/OneDrive/Desktop/Root_16S/root_otuTf.csv")
+write.csv(RNA_otuTf, "C:/Users/csmcg/OneDrive/Desktop/Root_16S/PCR_otuTf.csv")
+
+rm(root_otuTf_Py)
+rm(PCR_otuTf_root)
+
+###Import files as csv into environment###
+
+
+dim(PCR_otuTf_root)
+dim(root_otuTf)
+
+dim(root_otuTf_Pyt)
+dim(root_otuTf_Pyt2)
+
+RNA_root_genus <- merge(root_otuTf_Pyt, root_otuTf_Pyt2, by="sample")
+dim(RNA_root_genus)
+rownames(RNA_root_genus) <- RNA_root_genus$sample
+RNA_root_genus <- RNA_root_genus[,which(colnames(RNA_root_genus) != "sample")]
+dim(RNA_root_genus)
+
+RNA_root_cor <- rcorr(as.matrix(RNA_root_genus))
+
+# formatting a correlation matrix into a table with 4 columns containing
+flattenCorrMatrix <- function(cormat, pmat) {
+    ut <- upper.tri(cormat)
+    data.frame(
+        row = rownames(cormat)[row(cormat)[ut]],
+        column = rownames(cormat)[col(cormat)[ut]],
+        cor  =(cormat)[ut],
+        p = pmat[ut]
+    )
+}
+
+RNA_root_cor_table <- flattenCorrMatrix(RNA_root_cor$r, RNA_root_cor$P)
+dim(RNA_root_cor_table)
+head(RNA_root_cor_table)
+RNA_root_cor_table$p.adjusted <- p.adjust(RNA_root_cor_table$p,method = "fdr",n=length(RNA_root_cor_table$p))
+
+# transfer the dataframe to a symmetric matrix, 16S-PCR
+
+g <- graph.data.frame(RNA_root_cor_table[,c(1,2,3)], directed=FALSE)
+a <- get.adjacency(g, attr="cor", sparse=F)
+
+table(a[,1]==RNA_root_cor$r[,1])  
+
+g1 <- graph.data.frame(RNA_root_cor_table[,c(1,2,5)], directed=FALSE)
+b <- get.adjacency(g1, attr="p.adjusted", sparse=F)
+
+table(colnames(b) ==colnames(a))  
+
+PCR_genus_name <- colnames(root_otuTf_Pyt)
+root_genus_name <- colnames(root_otuTf_Pyt2)
+
+
+t_row <- which(colnames(a)%in%root_genus_name=="TRUE")
+t_col <- which(rownames(a)%in%PCR_genus_name=="TRUE")
+
+a1 <- a[t_row,t_col] 
+b1 <- b[t_row,t_col] 
+
+tiff("Root_with_Pythium_Corr_7x6.tiff", units="in", width=7, height=6, res=300)
+corrplot(a1, p.mat = b1, sig.level = 0.05, insig = "blank",tl.cex = 0.9,tl.col = "black", font=3,  type="lower", method = "circle",col=colorRampPalette(c("firebrick2","white","navyblue"))(10),addgrid.col = "grey", cl.ratio = 0.3)
+dev.off()
+
+tiff("Root_with_Pythium_Corr_7x6_noitalics.tiff", units="in", width=7, height=6, res=300)
+corrplot(a1, p.mat = b1, sig.level = 0.05, insig = "blank",tl.cex = 0.9,tl.col = "black",  type="lower", method = "circle",col=colorRampPalette(c("firebrick2","white","navyblue"))(10),addgrid.col = "grey", cl.ratio = 0.3)
+dev.off()
+
+corrplot(a1, p.mat = b1, sig.level = 0.05, insig = "blank",tl.cex = 0.9,tl.col = "black",  method = "color",col=colorRampPalette(c("firebrick2","lemonchiffon2","steelblue2"))(10),addgrid.col = "grey", cl.ratio = 0.3)
+
+write.csv(RNA_root_cor_table, "C:/Users/csmcg/OneDrive/Desktop/Root_16S/RNA_root_cor_table_trim.csv")
+
+
+##Correlation with only significant interactions##
+
+
+dim(root_otuTf_noPyt)
+dim(root_otuTf_noPyt2)
+
+
+RNA_root_genus <- merge(root_otuTf_noPyt, root_otuTf_noPyt2, by="sample")
+dim(RNA_root_genus)
+rownames(RNA_root_genus) <- RNA_root_genus$sample
+RNA_root_genus <- RNA_root_genus[,which(colnames(RNA_root_genus) != "sample")]
+dim(RNA_root_genus)
+
+RNA_root_cor <- rcorr(as.matrix(RNA_root_genus))
+
+# formatting a correlation matrix into a table with 4 columns containing
+flattenCorrMatrix <- function(cormat, pmat) {
+    ut <- upper.tri(cormat)
+    data.frame(
+        row = rownames(cormat)[row(cormat)[ut]],
+        column = rownames(cormat)[col(cormat)[ut]],
+        cor  =(cormat)[ut],
+        p = pmat[ut]
+    )
+}
+
+RNA_root_cor_table <- flattenCorrMatrix(RNA_root_cor$r, RNA_root_cor$P)
+dim(RNA_root_cor_table)
+head(RNA_root_cor_table)
+RNA_root_cor_table$p.adjusted <- p.adjust(RNA_root_cor_table$p,method = "fdr",n=length(RNA_root_cor_table$p))
+
+
+# transfer the dataframe to a symmetric matrix, 16S-PCR
+
+g <- graph.data.frame(RNA_root_cor_table[,c(1,2,3)], directed=FALSE)
+a <- get.adjacency(g, attr="cor", sparse=F)
+
+table(a[,1]==RNA_root_cor$r[,1])  
+
+g1 <- graph.data.frame(RNA_root_cor_table[,c(1,2,5)], directed=FALSE)
+b <- get.adjacency(g1, attr="p.adjusted", sparse=F)
+
+table(colnames(b) ==colnames(a))  
+
+PCR_genus_name <- colnames(root_otuTf_noPyt)
+root_genus_name <- colnames(root_otuTf_noPyt2)
+
+
+t_row <- which(colnames(a)%in%root_genus_name=="TRUE")
+t_col <- which(rownames(a)%in%PCR_genus_name=="TRUE")
+
+a1 <- a[t_row,t_col] 
+b1 <- b[t_row,t_col] 
+
+
+tiff("Root_without_Pythium_Corr_7x6.tiff", units="in", width=7, height=6, res=300)
+corrplot(a1, p.mat = b1, sig.level = 0.05, insig = "blank",tl.cex = 0.9,tl.col = "black",  type="lower", font=3, method="circle",col=colorRampPalette(c("firebrick2","white","navyblue"))(10),addgrid.col = "grey", cl.ratio = 0.3)
+dev.off()
+
+
+tiff("Root_without_Pythium_Corr_7x6_Noitalics_.tiff", units="in", width=7, height=6, res=300)
+corrplot(a1, p.mat = b1, sig.level = 0.05, insig = "blank",tl.cex = 0.9,tl.col = "black",  type="lower", method="circle",col=colorRampPalette(c("firebrick2","white","navyblue"))(10),addgrid.col = "grey", cl.ratio = 0.3)
+dev.off()
+
+
+corrplot(a1, p.mat = b1, sig.level = 0.05, insig = "blank",tl.cex = 0.8,tl.col = "black", method = "circle",col=colorRampPalette(c("dodgerblue4","wheat1","darkorchid4"))(100),addgrid.col = "grey", cl.ratio = 0.2)
+
+
+corrplot(a1, p.mat = b1, sig.level = 0.05, insig = "blank",tl.cex = 0.9,tl.col = "black", method = "circle",col=colorRampPalette(c("dodgerblue4","wheat1","darkorchid4"))(7),addgrid.col = "grey", cl.ratio = 0.3)
+
+corrplot(a1, p.mat = b1, sig.level = 0.05, insig = "blank",tl.cex = 0.9,tl.col = "black", method = "circle",col=colorRampPalette(c("dodgerblue4","wheat1","firebrick4"))(10),addgrid.col = "grey", cl.ratio = 0.3)
+
+
+write.csv(RNA_root_cor_table, "C:/Users/csmcg/OneDrive/Desktop/Root_16S/RNA_root_cor_table_trim_II.csv")
+
+
+dim(PCR_otuTf)
+dim(root_otuTf)
+
+
+RNA_root_genus <- merge(PCR_otuTf, root_otuTf, by="sample")
+dim(RNA_root_genus)
+rownames(RNA_root_genus) <- RNA_root_genus$sample
+RNA_root_genus <- RNA_root_genus[,which(colnames(RNA_root_genus) != "sample")]
+dim(RNA_root_genus)
+
+RNA_root_cor <- rcorr(as.matrix(RNA_root_genus))
+
+# formatting a correlation matrix into a table with 4 columns containing
+flattenCorrMatrix <- function(cormat, pmat) {
+    ut <- upper.tri(cormat)
+    data.frame(
+        row = rownames(cormat)[row(cormat)[ut]],
+        column = rownames(cormat)[col(cormat)[ut]],
+        cor  =(cormat)[ut],
+        p = pmat[ut]
+    )
+}
+
+RNA_root_cor_table <- flattenCorrMatrix(RNA_root_cor$r, RNA_root_cor$P)
+dim(RNA_root_cor_table)
+head(RNA_root_cor_table)
+RNA_root_cor_table$p.adjusted <- p.adjust(RNA_root_cor_table$p,method = "fdr",n=length(RNA_root_cor_table$p))
+
+# transfer the dataframe to a symmetric matrix, 16S-PCR
+
+g <- graph.data.frame(RNA_root_cor_table[,c(1,2,3)], directed=FALSE)
+a <- get.adjacency(g, attr="cor", sparse=F)
+
+table(a[,1]==RNA_root_cor$r[,1])  
+
+g1 <- graph.data.frame(RNA_root_cor_table[,c(1,2,5)], directed=FALSE)
+b <- get.adjacency(g1, attr="p.adjusted", sparse=F)
+
+table(colnames(b) ==colnames(a))  
+
+PCR_genus_name <- colnames(PCR_otuTf)
+root_genus_name <- colnames(root_otuTf)
+
+
+t_row <- which(colnames(a)%in%root_genus_name=="TRUE")
+t_col <- which(rownames(a)%in%PCR_genus_name=="TRUE")
+
+a1 <- a[t_row,t_col] 
+b1 <- b[t_row,t_col] 
+
+corrplot(a1, p.mat = b1, sig.level = 0.05, insig = "blank",tl.cex = 0.6, method = "color",addgrid.col = "grey", cl.ratio = 0.2)
+
+corrplot(a1, p.mat = b1, sig.level = 0.05, insig = "blank",tl.cex = 0.8,tl.col = "black", method = "color",addgrid.col = "grey", cl.ratio = 0.2)
+
+corrplot(a1, p.mat = b1, sig.level = 0.05, insig = "blank",tl.cex = 0.8,tl.col = "black", method = "ellipse",addgrid.col = "grey", cl.ratio = 0.2)
+
+corrplot(a1, p.mat = b1, sig.level = 0.05, insig = "blank",tl.cex = 0.8,tl.col = "black", method = "number",addgrid.col = "grey", cl.ratio = 0.2)
+
+corrplot(a1, p.mat = b1, sig.level = 0.05, insig = "blank",tl.cex = 0.8,tl.col = "black", method = "circle",col=colorRampPalette(c("dodgerblue4","wheat1","darkorchid4"))(100),addgrid.col = "grey", cl.ratio = 0.2)
+
+##Can change 3 colors to anything in ggplot2##
+
+corrplot(a1, p.mat = b1, sig.level = 0.05, insig = "blank",tl.cex = 0.8,tl.col = "black", method = "ellipse",col=colorRampPalette(c("palevioletred4","cornsilk1","turquoise4"))(100),addgrid.col = "grey", cl.ratio = 0.2)
+
+write.csv(RNA_NS_cor_table, "C:/Users/csmcg/OneDrive/Desktop/Root_16S/RNA_root_cor_table_trim_II.csv")
+
+
+###By TREATMENT (N=5)##
+##BY Non-autoclaved##
+
+rm(root_otuTf_Non-autoclaved)
+rm(PCR_otuTf_Non-autoclaved)
+
+RNA_root_genus <- merge(PCR_otuTf_Non-autoclaved, root_otuTf_Non-autoclaved, by="sample")
+dim(RNA_root_genus)
+rownames(RNA_root_genus) <- RNA_root_genus$sample
+RNA_root_genus <- RNA_root_genus[,which(colnames(RNA_root_genus) != "sample")]
+dim(RNA_root_genus)
+
+RNA_root_cor <- rcorr(as.matrix(RNA_root_genus))
+
+# formatting a correlation matrix into a table with 4 columns containing
+flattenCorrMatrix <- function(cormat, pmat) {
+    ut <- upper.tri(cormat)
+    data.frame(
+        row = rownames(cormat)[row(cormat)[ut]],
+        column = rownames(cormat)[col(cormat)[ut]],
+        cor  =(cormat)[ut],
+        p = pmat[ut]
+    )
+}
+
+RNA_root_cor_table <- flattenCorrMatrix(RNA_root_cor$r, RNA_root_cor$P)
+dim(RNA_root_cor_table)
+head(RNA_root_cor_table)
+RNA_root_cor_table$p.adjusted <- p.adjust(RNA_root_cor_table$p,method = "fdr",n=length(RNA_root_cor_table$p))
+
+# transfer the dataframe to a symmetric matrix, 16S-PCR
+
+g <- graph.data.frame(RNA_root_cor_table[,c(1,2,3)], directed=FALSE)
+a <- get.adjacency(g, attr="cor", sparse=F)
+
+table(a[,1]==RNA_root_cor$r[,1])  
+
+g1 <- graph.data.frame(RNA_root_cor_table[,c(1,2,5)], directed=FALSE)
+b <- get.adjacency(g1, attr="p.adjusted", sparse=F)
+
+table(colnames(b) ==colnames(a))  
+
+PCR_genus_name <- colnames(PCR_otuTf_Non-autoclaved)
+root_genus_name <- colnames(root_otuTf_Non-autoclaved)
+
+
+t_row <- which(colnames(a)%in%root_genus_name=="TRUE")
+t_col <- which(rownames(a)%in%PCR_genus_name=="TRUE")
+
+a1 <- a[t_row,t_col] 
+b1 <- b[t_row,t_col] 
+
+write.csv(RNA_root_cor_table, "C:/Users/csmcg/OneDrive/Desktop/Root_16S/RNA_root_cor_table_trim_Non-autoclaved2.csv")
+
+
+corrplot(a1, p.mat = b1, sig.level = 0.05, insig = "blank",tl.cex = 0.8,tl.col = "black", method = "color",addgrid.col = "grey", cl.ratio = 0.2)
+
+corrplot(a1, p.mat = b1, sig.level = 0.05, insig = "blank",tl.cex = 0.8,tl.col = "black", method = "ellipse",addgrid.col = "grey", cl.ratio = 0.2)
+
+corrplot(a1, p.mat = b1, sig.level = 0.05, insig = "blank",tl.cex = 0.8,tl.col = "black", method = "number",addgrid.col = "grey", cl.ratio = 0.2)
+
+corrplot(a1, p.mat = b1, sig.level = 0.05, insig = "blank",tl.cex = 0.8,tl.col = "black", method = "circle",addgrid.col = "grey", cl.ratio = 0.2)
+
+
+
+##BY Autoclaved##
+
+rm(root_otuTf_Autoclaved)
+rm(PCR_otuTf_Autoclaved)
+
+RNA_root_genus <- merge(PCR_otuTf_Autoclaved, root_otuTf_Autoclaved, by="sample")
+dim(RNA_root_genus)
+rownames(RNA_root_genus) <- RNA_root_genus$sample
+RNA_root_genus <- RNA_root_genus[,which(colnames(RNA_root_genus) != "sample")]
+dim(RNA_root_genus)
+
+RNA_root_cor <- rcorr(as.matrix(RNA_root_genus))
+
+# formatting a correlation matrix into a table with 4 columns containing
+flattenCorrMatrix <- function(cormat, pmat) {
+    ut <- upper.tri(cormat)
+    data.frame(
+        row = rownames(cormat)[row(cormat)[ut]],
+        column = rownames(cormat)[col(cormat)[ut]],
+        cor  =(cormat)[ut],
+        p = pmat[ut]
+    )
+}
+
+RNA_root_cor_table <- flattenCorrMatrix(RNA_root_cor$r, RNA_root_cor$P)
+dim(RNA_root_cor_table)
+head(RNA_root_cor_table)
+RNA_root_cor_table$p.adjusted <- p.adjust(RNA_NS_cor_table$p,method = "fdr",n=length(RNA_root_cor_table$p))
+
+# transfer the dataframe to a symmetric matrix, 16S-PCR
+
+g <- graph.data.frame(RNA_root_cor_table[,c(1,2,3)], directed=FALSE)
+a <- get.adjacency(g, attr="cor", sparse=F)
+
+table(a[,1]==RNA_root_cor$r[,1])  
+
+g1 <- graph.data.frame(RNA_root_cor_table[,c(1,2,5)], directed=FALSE)
+b <- get.adjacency(g1, attr="p.adjusted", sparse=F)
+
+table(colnames(b) ==colnames(a))  
+
+PCR_genus_name <- colnames(PCR_otuTf_Autoclaved)
+root_genus_name <- colnames(root_otuTf_Autoclaved)
+
+
+t_row <- which(colnames(a)%in%NS_genus_name=="TRUE")
+t_col <- which(rownames(a)%in%PCR_genus_name=="TRUE")
+
+a1 <- a[t_row,t_col] 
+b1 <- b[t_row,t_col] 
+
+write.csv(RNA_root_cor_table, "C:/Users/csmcg/OneDrive/Desktop/Root_16S/RNA_root_cor_table_trim_Autoclaved.csv")
+
+
+corrplot(a1, p.mat = b1, sig.level = 0.05, insig = "blank",tl.cex = 0.8,tl.col = "black", method = "color",addgrid.col = "grey", cl.ratio = 0.2)
+
+corrplot(a1, p.mat = b1, sig.level = 0.05, insig = "blank",tl.cex = 0.8,tl.col = "black", method = "ellipse",addgrid.col = "grey", cl.ratio = 0.2)
+
+corrplot(a1, p.mat = b1, sig.level = 0.05, insig = "blank",tl.cex = 0.8,tl.col = "black", method = "number",addgrid.col = "grey", cl.ratio = 0.2)
+
+corrplot(a1, p.mat = b1, sig.level = 0.05, insig = "blank",tl.cex = 0.8,tl.col = "black", method = "circle",addgrid.col = "grey", cl.ratio = 0.2)
+
+##BY Non-autoclaved + P##
+
+rm(root_otuTf_rp)
+rm(PCR_otuTf_rp)
+
+RNA_root_genus <- merge(PCR_otuTf_rp, root_otuTf_rp, by="sample")
+dim(RNA_root_genus)
+rownames(RNA_root_genus) <- RNA_root_genus$sample
+RNA_root_genus <- RNA_root_genus[,which(colnames(RNA_root_genus) != "sample")]
+dim(RNA_root_genus)
+
+RNA_root_cor <- rcorr(as.matrix(RNA_root_genus))
+
+# formatting a correlation matrix into a table with 4 columns containing
+flattenCorrMatrix <- function(cormat, pmat) {
+    ut <- upper.tri(cormat)
+    data.frame(
+        row = rownames(cormat)[row(cormat)[ut]],
+        column = rownames(cormat)[col(cormat)[ut]],
+        cor  =(cormat)[ut],
+        p = pmat[ut]
+    )
+}
+
+RNA_root_cor_table <- flattenCorrMatrix(RNA_root_cor$r, RNA_root_cor$P)
+dim(RNA_root_cor_table)
+head(RNA_root_cor_table)
+RNA_root_cor_table$p.adjusted <- p.adjust(RNA_root_cor_table$p,method = "fdr",n=length(RNA_root_cor_table$p))
+
+# transfer the dataframe to a symmetric matrix, 16S-PCR
+
+g <- graph.data.frame(RNA_root_cor_table[,c(1,2,3)], directed=FALSE)
+a <- get.adjacency(g, attr="cor", sparse=F)
+
+table(a[,1]==RNA_root_cor$r[,1])  
+
+g1 <- graph.data.frame(RNA_root_cor_table[,c(1,2,5)], directed=FALSE)
+b <- get.adjacency(g1, attr="p.adjusted", sparse=F)
+
+table(colnames(b) ==colnames(a))  
+
+PCR_genus_name <- colnames(PCR_otuTf_rp)
+root_genus_name <- colnames(root_otuTf_rp)
+
+
+t_row <- which(colnames(a)%in%root_genus_name=="TRUE")
+t_col <- which(rownames(a)%in%PCR_genus_name=="TRUE")
+
+a1 <- a[t_row,t_col] 
+b1 <- b[t_row,t_col] 
+
+write.csv(RNA_root_cor_table, "C:/Users/csmcg/OneDrive/Desktop/Root_16S/RNA_root_cor_table_trim_rp2.csv")
+
+
+corrplot(a1, p.mat = b1, sig.level = 0.05, insig = "blank",tl.cex = 0.8,tl.col = "black", method = "color",addgrid.col = "grey", cl.ratio = 0.3)
+
+corrplot(a1, p.mat = b1, sig.level = 0.05, insig = "blank",tl.cex = 0.8,tl.col = "black", method = "ellipse",addgrid.col = "grey", cl.ratio = 0.3)
+
+corrplot(a1, p.mat = b1, sig.level = 0.05, insig = "blank",tl.cex = 0.8,tl.col = "black", method = "number",addgrid.col = "grey", cl.ratio = 0.2)
+
+corrplot(a1, p.mat = b1, sig.level = 0.05, insig = "blank",tl.cex = 0.8,tl.col = "black", method = "circle",addgrid.col = "grey", cl.ratio = 0.2)
+
+corrplot(a1, p.mat = b1, sig.level = 0.05, insig = "blank",tl.cex = 0.8,tl.col = "black", method = "circle",col=colorRampPalette(c("mediumpurple2","white","darkolivegreen4"))(100),addgrid.col = "grey", cl.ratio = 0.2)
+
+corrplot(a1, p.mat = b1, sig.level = 0.05, insig = "blank",tl.cex = 0.8,tl.col = "black", method = "circle",col=colorRampPalette(c("mediumorchid4","white","darkolivegreen4"))(100),addgrid.col = "grey", cl.ratio = 0.2)
+
+
+##BY Autoclaved + P##
+
+rm(root_otuTf_sp)
+rm(PCR_otuTf_sp)
+
+RNA_root_genus <- merge(PCR_otuTf_sp, root_otuTf_sp, by="sample")
+dim(RNA__rootenus)
+rownames(RNA_root_genus) <- RNA_root_genus$sample
+RNA_root_genus <- RNA_root_genus[,which(colnames(RNA_root_genus) != "sample")]
+dim(RNA_root_genus)
+
+RNA_root_cor <- rcorr(as.matrix(RNA_root_genus))
+
+# formatting a correlation matrix into a table with 4 columns containing
+flattenCorrMatrix <- function(cormat, pmat) {
+    ut <- upper.tri(cormat)
+    data.frame(
+        row = rownames(cormat)[row(cormat)[ut]],
+        column = rownames(cormat)[col(cormat)[ut]],
+        cor  =(cormat)[ut],
+        p = pmat[ut]
+    )
+}
+
+RNA_root_cor_table <- flattenCorrMatrix(RNA_root_cor$r, RNA_root_cor$P)
+dim(RNA_root_cor_table)
+head(RNA_root_cor_table)
+RNA_root_cor_table$p.adjusted <- p.adjust(RNA_root_cor_table$p,method = "fdr",n=length(RNA_root_cor_table$p))
+
+# transfer the dataframe to a symmetric matrix, 16S-PCR
+
+g <- graph.data.frame(RNA_root_cor_table[,c(1,2,3)], directed=FALSE)
+a <- get.adjacency(g, attr="cor", sparse=F)
+
+table(a[,1]==RNA_root_cor$r[,1])  
+
+g1 <- graph.data.frame(RNA_root_cor_table[,c(1,2,5)], directed=FALSE)
+b <- get.adjacency(g1, attr="p.adjusted", sparse=F)
+
+table(colnames(b) ==colnames(a))  
+
+PCR_genus_name <- colnames(PCR_otuTf_sp)
+root_genus_name <- colnames(root_otuTf_sp)
+
+
+t_row <- which(colnames(a)%in%root_genus_name=="TRUE")
+t_col <- which(rownames(a)%in%PCR_genus_name=="TRUE")
+
+a1 <- a[t_row,t_col] 
+b1 <- b[t_row,t_col] 
+
+write.csv(RNA_NS_cor_table, "C:/Users/csmcg/OneDrive/Desktop/Root_16S/RNA_root_cor_table_trim_sp2.csv")
+
+
+corrplot(a1, p.mat = b1, sig.level = 0.05, insig = "blank",tl.cex = 0.8,tl.col = "black", method = "color",addgrid.col = "grey", cl.ratio = 0.3)
+
+corrplot(a1, p.mat = b1, sig.level = 0.05, insig = "blank",tl.cex = 0.8,tl.col = "black", method = "ellipse",addgrid.col = "grey", cl.ratio = 0.3)
+
+corrplot(a1, p.mat = b1, sig.level = 0.05, insig = "blank",tl.cex = 0.8,tl.col = "black", method = "number",addgrid.col = "grey", cl.ratio = 0.2)
+
+corrplot(a1, p.mat = b1, sig.level = 0.05, insig = "blank",tl.cex = 0.8,tl.col = "black", method = "circle",addgrid.col = "grey", cl.ratio = 0.2)
+
+corrplot(a1, p.mat = b1, sig.level = 0.05, insig = "blank",tl.cex = 0.8,tl.col = "black", method = "circle",col=colorRampPalette(c("mediumpurple2","white","darkolivegreen4"))(100),addgrid.col = "grey", cl.ratio = 0.2)
+
+corrplot(a1, p.mat = b1, sig.level = 0.05, insig = "blank",tl.cex = 0.8,tl.col = "black", method = "square",col=colorRampPalette(c("brown4","white","dodgerblue4"))(100),addgrid.col = "grey", cl.ratio = 0.3)
+
+
+df
+##Export ASV and genus excel sheet##
+ASV = as(otu_table(ps_root), "matrix")
+# transpose if necessary
+if(taxa_are_rows(ps_root)){ASV <- t(ASV)}
+# Coerce to data.frame
+ASVdf = as.data.frame(ASV)
+write.csv(ASVdf, file='ASV_NS.csv')
+
+glom <- tax_glom(ps_root, taxrank = 'Genus')
+#create dataframe from phyloseq object
+dat <- psmelt(glom)
+#convert Class to a character vector from a factor
+dat$Genus <- as.character(dat$Genus)
+#aggregate
+Genus_abundance <- aggregate(Abundance~Sample+Genus, dat, FUN=sum)
+#reorganize the table so that each Class is a column
+library(reshape)
+Genus_abundance <- cast(Genus_abundance, Sample ~ Genus)
+#how to transpose file
+Genus_abundance <- t(Genus_abundance)
+write.csv(Genus_abundance, file='Genus_abundance.csv')
+
+
+
+###Denoised, no chimera table###
+write.csv(track, file='track_table_root.csv')
+#########
+##Phylum##
+glom <- tax_glom(ps_root, taxrank = 'Phylum')
+#create dataframe from phyloseq object
+dat <- psmelt(glom)
+#convert Class to a character vector from a factor
+dat$Phylum <- as.character(dat$Phylum)
+#aggregate
+Phylum_abundance <- aggregate(Abundance~Sample+Phylum, dat, FUN=sum)
+#reorganize the table so that each Class is a column
+library(reshape)
+Phylum_abundance <- cast(Phylum_abundance, Sample ~ Phylum)
+#how to transpose file
+Phylum_abundance <- t(Phylum_abundance)
+write.csv(Phylum_abundance, file='Phylum_abundance.csv')
+
+
+####Family#####
+glom <- tax_glom(ps_root, taxrank = 'Family')
+#create dataframe from phyloseq object
+dat <- psmelt(glom)
+#convert Class to a character vector from a factor
+dat$Family <- as.character(dat$Family)
+#aggregate
+Family_abundance <- aggregate(Abundance~Sample+Family, dat, FUN=sum)
+#reorganize the table so that each Class is a column
+library(reshape)
+Family_abundance <- cast(Family_abundance, Sample ~ Family)
+#how to transpose file
+Family_abundance <- t(Family_abundance)
+write.csv(Family_abundance, file='Family_abundance.csv')
+
+########
+
+
+##Alpha diversity plots##
+
+melted_root <- psmelt(ps_root)
+
+plot_richness(ps_root, x="Treatment", measures=c("Shannon", "Simpson"), color="Cycle", shape="Pathogen") + geom_point(size=3.5)
+plot_richness(ps_root, x="Treatment", measures=c("Shannon", "Simpson", "Observed"), color="Cycle") + geom_point(size=5)
+plot_richness(ps_root, x="Treatment", measures=c("Shannon", "Simpson", "Observed"), shape ="Cycle" + geom_point(size=7))
+  
+  
+  ##Group by type of sample## ##By Cycle, Treatment, and Pathogen####
+plot_richness(ps_root, x=("Treatment"), measures=c("Shannon", "Simpson"), color = "Cycle", shape="Pathogen") + geom_point(size=4) +
+  scale_shape_manual(values=c(1, 2)) +  theme(axis.text.x = element_text(size  = 14, angle = 45, hjust = 1, vjust = 1)) +
+  theme(axis.text.y = element_text(size  = 14)) + theme(strip.text=element_text(size=14)) +
+  xlab("") +
+  theme(panel.grid.major.y = element_blank(), panel.grid.minor.y = element_blank()) +
+  theme(legend.title=element_blank()) +
+  scale_color_manual(values = wes_palette("Darjeeling2", n = 6, type = "continuous"))+
+  theme(strip.text.x = element_text(size = 14)) + theme(legend.text = element_text(size = 14))
+  
+  
+
+##Group individually as Treatment or cycle##
+plot_richness(ps_root, x=("Treatment"), measures=c("Shannon", "Simpson"), color = "Cycle") + geom_point(size=4) +
+  scale_shape_manual(values=c(1, 2)) +  theme(axis.text.x = element_text(size  = 11, angle = 45, hjust = 1, vjust = 1)) +
+  theme(axis.text.y = element_text(size  = 11)) + theme(strip.text=element_text(size=11)) +
+  xlab("") +
+  theme(panel.grid.major.y = element_blank(), panel.grid.minor.y = element_blank()) +
+  theme(legend.title=element_blank()) +
+  scale_color_manual(values = wes_palette("Darjeeling2", n = 6, type = "continuous"))+
+  theme(strip.text.x = element_text(size = 11)) + theme(legend.text = element_text(size = 11))
+  
+  ##Group individually as Treatment or cycle##
+plot_richness(ps_root, x=("Treatment"), measures=c("Shannon", "Simpson"), color = "Cycle") + geom_point(size=4) +
+  scale_shape_manual(values=c(1, 2)) +  theme(axis.text.x = element_text(size  = 11, angle = 45, hjust = 1, vjust = 1)) +
+  theme(axis.text.y = element_text(size  = 11)) + theme(strip.text=element_text(size=11)) +
+  xlab("") +
+  theme(panel.grid.major.y = element_blank(), panel.grid.minor.y = element_blank()) +
+  theme(legend.title=element_blank()) +
+  scale_color_manual(values = wes_palette("Darjeeling2", n = 6, type = "continuous"))+
+  theme(strip.text.x = element_text(size = 11)) + theme(legend.text = element_text(size = 11))
+  
+  
+  estimate_richness(ps_root, x="Treatment", measures=c("Shannon", "Simpson"), color = "Cycle") + geom_point(size=2) +
+  scale_shape_manual(values=c(1, 2)) +  theme(axis.text.x = element_text(size  = 11, angle = 45, hjust = 1, vjust = 1)) + 
+  theme(axis.text.y = element_text(size  = 11)) + theme(strip.text=element_text(size=11)) +
+  xlab("") +
+  theme(panel.grid.major.y = element_blank(), panel.grid.minor.y = element_blank()) +
+  theme(legend.title=element_blank()) +
+  scale_color_manual(values = wes_palette("Darjeeling2", n = 7, type = "continuous"))+
+  theme(strip.text.x = element_text(size = 11)) + theme(legend.text = element_text(size = 11))
+  
+  
+##Boxplot##
+
+##***Alpha diversity, richness***##
+est_rich <- estimate_richness(ps_root,  measures=c("Shannon", "Simpson"))
+est_rich$merge <- rownames(est_rich)
+samdf_root$merge <- rownames(samdf_root)
+est_rich <- merge(est_rich, samdf_root, by = "merge")
+est_rich <- melt(est_rich)
+
+library(reshape) 
+reshape::melt(est_rich)
+
+write.csv(est_rich, file='alphadiversity.csv')
+
+
+##**Boxplot## 
+ ##***Alpha diversity, Shannon***##
+est_rich <- estimate_richness(ps_root,  measures=c("Shannon"))
+est_rich$merge <- rownames(est_rich)
+samdf_root$merge <- rownames(samdf_root)
+est_rich <- merge(est_rich, samdf_root, by = "merge")
+est_rich <- melt(est_rich)
+
+library(reshape) 
+reshape::melt(est_rich)
+
+setwd("C:/Users/csmcg/OneDrive/Desktop/Reused_data")
+
+write.csv(est_rich, file='alphadiversity_Shannon_root.csv')
+
+tiff("Roots_Alpha_Shannon_7x5.tiff", units="in", width=7, height=5, res=300)
+ggplot(est_rich, aes(x = Treatment, y = value, fill = Cycle)) +
+  geom_boxplot(size = 0.5) + theme_bw()+
+  scale_shape_manual(values=c(1, 2, 3)) +
+  xlab("") + ylab("Shannon Diversity Index") +
+  theme(panel.grid.major.y = element_blank(), panel.grid.minor.y = element_blank()) +
+  scale_fill_manual(values = my.colors6) +
+  theme(axis.text.x = element_text(size  = 11, angle = 90, hjust = 1, vjust = 0.5, color='black'))+ theme(axis.text.y = element_text(colour = 'black', size = 11))+  theme(legend.text = element_text(size = 11, colour ="black")) + theme(legend.title = element_text(size = 11)) 
+dev.off()
+
+
+##Without dots, geom_jitter##
+ggplot(est_rich, aes(x = Treatment, y = value, fill = Cycle)) +
+  geom_boxplot(size = 1) + theme_bw()+
+  scale_shape_manual(values=c(1, 2, 3)) +
+  xlab("") + ylab("Shannon Diversity Index") +
+  theme(panel.grid.major.y = element_blank(), panel.grid.minor.y = element_blank()) +
+  scale_fill_manual(values = my.colors6) +
+  theme(axis.text.x = element_text(size  = 12, angle = 90, hjust = 1, vjust = 0.5))
+  
+  
+my.colors6 <- colorRampPalette(c('orange3','#0B775E','lightblue3', 'burlywood4', '#B40F20','peachpuff2' ))(6)
+
+
+####Kruskal_Wallis####
+compare_means(Shannon ~ Treatment, data = ps_root, method = "kruskal.test")
+
+  ##Boxplot with outlier##
+ggplot(est_rich, aes(x = Treatment, y = value, color = Cycle)) +
+  geom_boxplot(size = 1, outlier.colour="red", outlier.shape=8,
+                outlier.size=4) + geom_jitter(shape=16, position=position_jitter(0.2)) +
+  scale_shape_manual(values=c(1, 2, 3)) +
+  xlab("") + ylab("Shannon Alpha Diversity Measure") +
+  theme(panel.grid.major.y = element_blank(), panel.grid.minor.y = element_blank()) +
+  theme(legend.title=element_blank()) +
+  scale_color_manual(values = wes_palette("Darjeeling2", n = 5, type = "continuous")) +
+  theme(axis.text.x = element_text(size  = 12, angle = 90, hjust = 1, vjust = 0.5))
+
+##Boxplot without outlier##
+ggplot(est_rich, aes(x = Pathogen, y = value, color = Cycle)) +
+  geom_boxplot(size = 1) + geom_jitter(shape=16, position=position_jitter(0.2)) +
+  scale_shape_manual(values=c(1, 2, 3)) +
+  xlab("") + ylab("Shannon Alpha Diversity Measure") +
+  theme(panel.grid.major.y = element_blank(), panel.grid.minor.y = element_blank()) +
+  theme(legend.title=element_blank()) +
+  scale_color_manual(values = wes_palette("Darjeeling2", n = 7, type = "continuous")) +
+  theme(axis.text.x = element_text(size  = 12, angle = 90, hjust = 1, vjust = 0.5))
+
+ggplot(est_rich, aes(x = Cycle, y = value, color = Pathogen)) +
+  geom_boxplot(size = 1) + geom_jitter(shape=16, position=position_jitter(0.2)) +
+  scale_shape_manual(values=c(1, 2, 3)) +
+  xlab("") + ylab("Shannon Alpha Diversity Measure") +
+  theme(panel.grid.major.y = element_blank(), panel.grid.minor.y = element_blank()) +
+  theme(legend.title=element_blank()) +
+  scale_color_manual(values = wes_palette("Cavalcanti1", n = 2, type = "continuous")) +
+  theme(axis.text.x = element_text(size  = 12, angle = 90, hjust = 1, vjust = 0.5))
+
+
+
+##Boxplot without outlier##
+ggplot(est_rich, aes(x = Solution, y = value, color = Pathogen)) +
+  geom_boxplot(size = 1) + geom_jitter(shape=16, position=position_jitter(0.2)) +
+  scale_shape_manual(values=c(1, 2, 3)) +
+  xlab("") + ylab("Shannon Alpha Diversity Measure") +
+  theme(panel.grid.major.y = element_blank(), panel.grid.minor.y = element_blank()) +
+  theme(legend.title=element_blank()) +
+  scale_color_manual(values = wes_palette("Cavalcanti1", n = 2, type = "continuous")) +
+  theme(axis.text.x = element_text(size  = 12, angle = 90, hjust = 1, vjust = 0.5))
+
+
+##By Treatment & Cycle##
+ggplot(est_rich, aes(x = Treatment, y = value, color = Cycle)) +
+  geom_boxplot(size = 1) + geom_jitter(shape=16, position=position_jitter(0.2)) +
+  scale_shape_manual(values=c(1, 2, 3)) +
+  xlab("") + ylab("Shannon Alpha Diversity Measure") +
+  theme(panel.grid.major.y = element_blank(), panel.grid.minor.y = element_blank()) +
+  theme(legend.title=element_blank()) +
+  scale_color_manual(values = wes_palette("Cavalcanti1", n = 6, type = "continuous")) +
+  theme(axis.text.x = element_text(size  = 12, angle = 90, hjust = 1, vjust = 0.5))
+
+
+ ##***Alpha diversity, Simpson***##
+est_rich <- estimate_richness(ps_root,  measures=c("Simpson"))
+est_rich$merge <- rownames(est_rich)
+samdf_root$merge <- rownames(samdf_root)
+est_rich <- merge(est_rich, samdf_root, by = "merge")
+est_rich <- melt(est_rich)
+
+library(reshape) 
+reshape::melt(est_rich)
+
+
+tiff("Roots_Alpha_Simpson_7x5.tiff", units="in", width=7, height=5, res=300)
+ggplot(est_rich, aes(x = Treatment, y = value, fill = Cycle)) +
+  geom_boxplot(size = 0.5) + theme_bw()+
+  scale_shape_manual(values=c(1, 2, 3)) +
+  xlab("") + ylab("Simpson Diversity Index") +
+  theme(panel.grid.major.y = element_blank(), panel.grid.minor.y = element_blank()) +
+  scale_fill_manual(values = my.colors6) +
+  theme(axis.text.x = element_text(size  = 11, angle = 90, hjust = 1, vjust = 0.5, color='black'))+ theme(axis.text.y = element_text(colour = 'black', size = 11))+  theme(legend.text = element_text(size = 11, colour ="black")) + theme(legend.title = element_text(size = 11)) 
+  dev.off()
+
+write.csv(est_rich, file='alphadiversity_Simpson_root.csv')
+
+ggplot(est_rich, aes(x = Treatment, y = value, fill = Cycle)) +
+  geom_boxplot(size = 1) + theme_bw()+
+  scale_shape_manual(values=c(1, 2, 3)) +
+  xlab("") + ylab("Simpson Diversity Index") +
+  theme(panel.grid.major.y = element_blank(), panel.grid.minor.y = element_blank()) +
+  theme(legend.title=element_blank()) +
+  scale_fill_manual(values = my.colors6) +
+  theme(axis.text.x = element_text(size  = 12, angle = 90, hjust = 1, vjust = 0.5))
+  
+
+ ggplot(est_rich, aes(x = Pathogen, y = value, color = Cycle)) +
+  geom_boxplot(size = 1) + geom_jitter(shape=16, position=position_jitter(0.2)) +
+  scale_shape_manual(values=c(1, 2, 3)) +
+  xlab("") + ylab("Simpson Alpha Diversity Measure") +
+  theme(panel.grid.major.y = element_blank(), panel.grid.minor.y = element_blank()) +
+  theme(legend.title=element_blank()) +
+  scale_color_manual(values = wes_palette("Darjeeling2", n = 6, type = "continuous")) +
+  theme(axis.text.x = element_text(size  = 12, angle = 90, hjust = 1, vjust = 0.5))
+
+ggplot(est_rich, aes(x = Cycle, y = value, color = Pathogen)) +
+  geom_boxplot(size = 1) + geom_jitter(shape=16, position=position_jitter(0.2)) +
+  scale_shape_manual(values=c(1, 2, 3)) +
+  xlab("") + ylab("Simpson Alpha Diversity Measure") +
+  theme(panel.grid.major.y = element_blank(), panel.grid.minor.y = element_blank()) +
+  theme(legend.title=element_blank()) +
+  scale_color_manual(values = wes_palette("Cavalcanti1", n = 2, type = "continuous")) +
+  theme(axis.text.x = element_text(size  = 12, angle = 90, hjust = 1, vjust = 0.5))
+
+
+
+##Boxplot without outlier##
+ggplot(est_rich, aes(x = Solution, y = value, color = Pathogen)) +
+  geom_boxplot(size = 1) + geom_jitter(shape=16, position=position_jitter(0.2)) +
+  scale_shape_manual(values=c(1, 2, 3)) +
+  xlab("") + ylab("Simpson Alpha Diversity Measure") +
+  theme(panel.grid.major.y = element_blank(), panel.grid.minor.y = element_blank()) +
+  theme(legend.title=element_blank()) +
+  scale_color_manual(values = wes_palette("Cavalcanti1", n = 2, type = "continuous")) +
+  theme(axis.text.x = element_text(size  = 12, angle = 90, hjust = 1, vjust = 0.5))
+
+
+
+ggplot(est_rich, aes(x = Treatment, y = value, color = Cycle)) +
+  geom_boxplot(size = 1) + geom_jitter(shape=16, position=position_jitter(0.2)) +
+  scale_shape_manual(values=c(1, 2, 3)) +
+  xlab("") + ylab("Simpson Alpha Diversity Measure") +
+  theme(panel.grid.major.y = element_blank(), panel.grid.minor.y = element_blank()) +
+  theme(legend.title=element_blank()) +
+  scale_color_manual(values = wes_palette("Darjeeling2", n = 6, type = "continuous")) +
+  theme(axis.text.x = element_text(size  = 12, angle = 90, hjust = 1, vjust = 0.5))
+
+
+##By Treatment & Cycle##
+ggplot(est_rich, aes(x = Treatment, y = value, color = Cycle)) +
+  geom_boxplot(size = 1) + geom_jitter(shape=16, position=position_jitter(0.2)) +
+  scale_shape_manual(values=c(1, 2, 3)) +
+  xlab("") + ylab("Simpson Alpha Diversity Measure") +
+  theme(panel.grid.major.y = element_blank(), panel.grid.minor.y = element_blank()) +
+  theme(legend.title=element_blank()) +
+  scale_color_manual(values = wes_palette("Darjeeling2", n = 6, type = "continuous")) +
+  theme(axis.text.x = element_text(size  = 12, angle = 90, hjust = 1, vjust = 0.5))
+
+
+##Save file#
+#ggsave("plots/oomycete_alpha_diversity_site.pdf", dpi = 600)
+
+Sys.time()
+Sys.Date()
+```
+
+##Genus## ##BarPlot##
+
+melted_root <- psmelt(ps_root)
+
+## housekeeping - repeat for each taxa level
+# melted_nc$Genus <- gsub('g__', '', melted_nc$Genus)
+
+#facet for multiple treatments##
+# facet_grid(. ~ site)
+
+##Top5 Genus##
+melted_root$Genus <- gsub('g__', '', melted_root$Genus)
+genus_counts <- aggregate(melted_lettuce$Abundance, by=list(Category=melted_NS$Genus), FUN=sum)
+gc_reorder <- genus_counts[order(-genus_counts$x),]
+top5_genus <- NULL
+top5_genus$Genus <- head(gc_reorder$Category, 5)
+top5_melted <- subset(melted_NS, Genus %in% top5_genus$Genus)
+
+
+ggplot(top5_melted, aes(x = Treatment, y = Abundance, fill = Genus)) +
+  geom_bar(stat = "identity", position = "fill") +
+  # theme(legend.position = "none") +
+  scale_y_continuous(labels = function(x) format(x, scientific = TRUE)) +
+  theme(axis.text.x = element_text(size  = 12, angle = 45, hjust = 1, vjust = 1)) +
+  xlab("")+ ylab("Relative abundance") +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  scale_fill_manual(values = wes_palette("Darjeeling2", n = 11, type = "continuous")) +
+  scale_y_continuous(labels = scales::percent_format()) +
+  theme(strip.text.x = element_text(size = 12)) + theme(legend.text = element_text(size = 12))
+
+##TOP 20, all genus##
+melted_root$Genus <- gsub('g__', '', melted_root$Genus)
+genus_counts <- aggregate(melted_NS$Abundance, by=list(Category=melted_NS$Genus), FUN=sum)
+gc_reorder <- genus_counts[order(-genus_counts$x),]
+top20_genus <- NULL
+top20_genus$Genus <- head(gc_reorder$Category, 20)
+top20_melted <- subset(melted_root, Genus %in% top20_genus$Genus)
+  
+  
+  
+####Top15_Genus#####
+melted_root$Genus <- gsub('Methylobacterium-Methylorubrum', 'Methylobacterium', melted_root$Genus)
+genus_counts <- aggregate(melted_root$Abundance, by=list(Category=melted_root$Genus), FUN=sum)
+gc_reorder <- genus_counts[order(-genus_counts$x),]
+top15_genus <- NULL
+top15_genus$Genus <- head(gc_reorder$Category, 15)
+top15_melted <- subset(melted_root, Genus %in% top15_genus$Genus)
+
+install.packages("tidyverse")
+install.packages("ggplot2")
+library(ggplot2)
+library(tidyverse)
+
+
+##Remove Lactuca genus and NA### ##By Pathogen##
+ggplot(subset(top15_melted, Genus != "Lactuca"), aes(x = Cycle, y = Abundance, fill = Genus), subset = !(Genus == 'NA')) +
+  geom_bar(stat = "identity", position = "fill") +
+  # theme(legend.position = "none") +
+  scale_y_continuous(labels = function(x) format(x, scientific = TRUE)) +
+  theme(axis.text.x = element_text(size  = 14, angle = 45, hjust = 1, vjust = 1)) +
+  xlab("")+ ylab("Relative abundance") +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  scale_fill_manual(values = wes_palette("Darjeeling2", n = 15, type = "continuous")) +
+  scale_y_continuous(labels = scales::percent_format()) +
+  theme(strip.text.x = element_text(size = 14)) + theme(legend.text = element_text(size = 14)) + facet_grid(. ~ Treatment)
+  
+  
+  
+   ggplot(subset(top15_melted, Genus != "Lactuca"), aes(x = Cycle, y = Abundance, fill = Genus), subset = !(Genus == 'NA')) +
+  geom_bar(stat = "identity", position = "fill") +
+  # theme(legend.position = "none") +
+  scale_y_continuous(labels = function(x) format(x, scientific = TRUE)) +
+  theme(axis.text.x = element_text(size  = 12, angle = 45, hjust = 1, vjust = 1)) +
+  xlab("")+ ylab("Relative abundance") +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  scale_fill_manual(values = wes_palette("Darjeeling2", n = 15, type = "continuous")) +
+  scale_y_continuous(labels = scales::percent_format()) +
+  theme(strip.text.x = element_text(size = 12)) + theme(legend.text = element_text(size = 12)) + facet_grid(. ~ Treatment)
+  
+  ggplot(subset(top15_melted, Genus != "Lactuca"), aes(x = Cycle, y = Abundance, fill = Genus), subset = !(Genus == 'NA')) +
+  geom_bar(stat = "identity", position = "fill") +
+  # theme(legend.position = "none") +
+  scale_y_continuous(labels = function(x) format(x, scientific = TRUE)) +
+  theme(axis.text.x = element_text(size  = 14, angle = 45, hjust = 1, vjust = 1)) +
+  xlab("")+ ylab("Relative abundance") +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  scale_fill_manual(values = wes_palette("Darjeeling2", n = 15, type = "continuous")) +
+  scale_y_continuous(labels = scales::percent_format()) +
+  theme(strip.text.x = element_text(size = 14)) + theme(legend.text = element_text(size = 14)) + facet_grid(. ~ Treatment)
+  
+
+
+ggplot(top15_melted, aes(x = Treatment, y = Abundance, fill = Genus)) +
+  geom_bar(stat = "identity", position = "fill") +
+  # theme(legend.position = "none") +
+  scale_y_continuous(labels = function(x) format(x, scientific = TRUE)) +
+  theme(axis.text.x = element_text(size  = 12, angle = 45, hjust = 1, vjust = 1)) +
+  xlab("")+ ylab("Relative abundance") +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  scale_fill_manual(values = wes_palette("Darjeeling2", n = 15, type = "continuous")) +
+  scale_y_continuous(labels = scales::percent_format()) +
+  theme(strip.text.x = element_text(size = 12)) + theme(legend.text = element_text(size = 12))
+  
+  ggplot(top15_melted, aes(x = Cycle, y = Abundance, fill = Genus)) +
+  geom_bar(stat = "identity", position = "fill") +
+  # theme(legend.position = "none") +
+  scale_y_continuous(labels = function(x) format(x, scientific = TRUE)) +
+  theme(axis.text.x = element_text(size  = 14, angle = 45, hjust = 1, vjust = 1)) +
+  xlab("")+ ylab("Relative abundance") +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  scale_fill_manual(values = wes_palette("Darjeeling2", n = 15, type = "continuous")) +
+  scale_y_continuous(labels = scales::percent_format()) +
+  theme(strip.text.x = element_text(size = 14)) + theme(legend.text = element_text(size = 14))+ facet_grid(. ~ Treatment)
+
+
+##Family## ##Bar Plot#
+melted_root <- psmelt(ps_root)
+
+melted_root$Family <- gsub('s__', '', melted_root$Family)
+##Top15 Family##
+family_counts <- aggregate(melted_root$Abundance, by=list(Category=melted_root$Family), FUN=sum)
+sp_reorder <- family_counts[order(-family_counts$x),]
+top15_family <- NULL
+top15_family$Family <- head(sp_reorder$Category, 15)
+top15_melted <- subset(melted_root, Family %in% top15_family$Family)
+
+
+ggplot(top15_melted, aes(x = Run, y = Abundance, fill = Family)) +
+  geom_bar(stat = "identity", position = "fill") +
+  # theme(legend.position = "none") +
+  scale_y_continuous(labels = function(x) format(x, scientific = TRUE)) +
+  theme(axis.text.x = element_text(size  = 24, angle = 45, hjust = 1, vjust = 1)) +
+  xlab("")+ ylab("Relative abundance") +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  scale_fill_manual(values = wes_palette("FantasticFox1", n = 15, type = "continuous")) +
+  scale_y_continuous(labels = scales::percent_format()) +
+  theme(strip.text.x = element_text(size = 24)) + theme(legend.text = element_text(size = 24)) + facet_grid(. ~ Treatment)
+
+##Phyla## ##Bar Plot##
+melted_root <- psmelt(ps_root)
+
+melted_root$Phylum <- gsub('s__', '', melted_root$Phylum)
+##Top15 Phylum##
+phylum_counts <- aggregate(melted_root$Abundance, by=list(Category=melted_root$Phylum), FUN=sum)
+sp_reorder <- phylum_counts[order(-phylum_counts$x),]
+top15_phylum <- NULL
+top15_phylum$Phylum <- head(sp_reorder$Category, 15)
+top15_melted <- subset(melted_root, Phylum %in% top15_phylum$Phylum)
+
+
+ggplot(top15_melted, aes(x = Cycle, y = Abundance, fill = Phylum)) +
+  geom_bar(stat = "identity", position = "fill") +
+  # theme(legend.position = "none") +
+  scale_y_continuous(labels = function(x) format(x, scientific = TRUE)) +
+  theme(axis.text.x = element_text(size  = 14, angle = 45, hjust = 1, vjust = 1)) +
+  xlab("")+ ylab("Relative abundance") +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  scale_fill_manual(values = wes_palette("Darjeeling2", n = 15, type = "continuous")) +
+  scale_y_continuous(labels = scales::percent_format()) +
+  theme(strip.text.x = element_text(size = 14)) + theme(legend.text = element_text(size = 14))+ facet_grid(. ~ Treatment)
+
+
+
+#Ordination
+ps.prop <- transform_sample_counts(ps_root, function(otu) otu/sum(otu))
+ord.nmds.bray <- ordinate(ps.prop, method="NMDS", distance="bray")
+
+##Bray NMDS plot### ##By Cycle & Treatment##
+ps_root <- phyloseq(otu_table(seqtab.nochim_root, taxa_are_rows = FALSE), tax_table(taxa), samples_root)
+plot_ordination(ps.prop, ord.nmds.bray, color = "Cycle", shape="Treatment", title = "Bray NMDS") + geom_point(size = 4.5)+ scale_color_manual (values = wes_palette("Darjeeling2", n = 7, type = "continuous")) +
+  theme(legend.title=element_blank()) +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) 
+  
+  ##Bray NMDS plot### ##By Cycle & Pathogen##
+ps_root <- phyloseq(otu_table(seqtab.nochim_root, taxa_are_rows = FALSE), tax_table(taxa), samples_root)
+plot_ordination(ps.prop, ord.nmds.bray, color = "Cycle", shape="Pathogen", title = "Bray NMDS") + geom_point(size = 4.5)+ scale_color_manual (values = wes_palette("Darjeeling2", n = 6, type = "continuous")) +
+  theme(legend.title=element_blank()) +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) 
+  
+  
+  ##Bray NMDS plot### ##By Treatment##
+ps_root <- phyloseq(otu_table(seqtab.nochim_root, taxa_are_rows = FALSE), tax_table(taxa), samples_root)
+plot_ordination(ps.prop, ord.nmds.bray, color = "Treatment", title = "Bray NMDS") + geom_point(size = 4.5)+ scale_color_manual (values = wes_palette("Darjeeling2", n = 5, type = "continuous")) +
+  theme(legend.title=element_blank()) +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) 
+  
+  
+##Bray NMDS plot### ##By Pathogen & Treatment##
+ps_root <- phyloseq(otu_table(seqtab.nochim_root, taxa_are_rows = FALSE), tax_table(taxa), samples_root)
+plot_ordination(ps.prop, ord.nmds.bray, color = "Pathogen", shape="Treatment", title = "Bray NMDS") + geom_point(size = 4.5)+ scale_color_manual (values = wes_palette("Royal1", n = 2, type = "continuous")) +
+  theme(legend.title=element_blank()) +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) 
+  
+    ##Bray NMDS plot### ##By Pathogen##
+ps_root <- phyloseq(otu_table(seqtab.nochim_root, taxa_are_rows = FALSE), tax_table(taxa), samples_root)
+plot_ordination(ps.prop, ord.nmds.bray, color = "Pathogen", title = "Bray NMDS") + geom_point(size = 4.5)+ scale_color_manual (values = wes_palette("Royal1", n = 2, type = "continuous")) +
+  theme(legend.title=element_blank()) +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) 
+  
+      ##Bray NMDS plot### ##By Pathogen##
+ps_root <- phyloseq(otu_table(seqtab.nochim_root, taxa_are_rows = FALSE), tax_table(taxa), samples_root)
+plot_ordination(ps.prop, ord.nmds.bray, color = "Treatment", shape="Pathogen", title = "Bray NMDS") + geom_point(size = 4.5)+ scale_color_manual (values = wes_palette("Darjeeling2", n = 5, type = "continuous")) +
+  theme(legend.title=element_blank()) +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+  
+  
+   library(vegan)
+metadata <- as(samples_data(ps_root), "Cycle")
+
+adonis(distance(ps_root, method="NMDS") ~ "Treatment",
+       data = metadata)
+       
+bc <- phyloseq::distance(ps_root, "bray")
+adonis(bc ~ Cycle, data = samdf_root)
+
+bc <- phyloseq::distance(ps_root, "bray")
+adonis(bc ~ Pathogen, data = samdf_root)
+
+bc <- phyloseq::distance(ps_root, "bray")
+adonis(bc ~ Treatment, data = samdf_root)
+
+  
+#############
+
+# **Transform data to proportions as appropriate for Bray-Curtis distances
+ps.prop_root <- transform_sample_counts(ps_root, function(otu) otu/sum(otu))
+ord.nmds.bray_root <- ordinate(ps.prop_root, method="NMDS", distance="bray")
+ord.pcoa.bray_root <- ordinate(ps.prop_root, method="PCoA", distance="bray")
+
+pcoa_df_root <- as.data.frame(ord.pcoa.bray_root$vectors)
+pcoa_df_root$merge <- rownames(pcoa_df_root)
+pcoa_df_factors <- merge(pcoa_df_root, samdf_root, by = "merge")
+
+##Note: pcoa_df_NS and samdf_NS have to each have samples labeled merge##
+
+PC1_hs <- lm(Axis.1 ~ Treatment, data = pcoa_df_factors)
+summary(PC1_hs)
+
+ord.nmds.bray_root <- ordinate(ps.prop_root, method="PCoA", distance="bray")
+plot_ordination(ps.prop_root, ord.pcoa.bray_root, color= "Cycle", shape="Treatment")
+
+
+plot_ordination(ps.prop_root, ord.pcoa.bray_root, color= "Cycle", shape="Treatment") +
+  geom_point(size=3) +
+scale_color_manual (values = wes_palette("Chevalier1", n = 5, type = "continuous")) +
+  theme(legend.title=element_blank()) +
+  xlab("PC1 (87.2%)") + ylab("PC2 (6.3%)") +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+  
+  plot_ordination(ps.prop_root, ord.pcoa.bray_root, color= "Cycle", shape="Treatment")
+  
+  plot_ordination(ps.prop_root, ord.pcoa.bray_root, color= "Cycle", shape="Treatment") +
+  geom_point(size=3) +
+scale_color_manual (values = wes_palette("Rushmore1", n = 8, type = "continuous")) +
+  theme(legend.title=element_blank()) +
+  xlab("PC1 (23.4%)") + ylab("PC2 (8.8%)") +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+  
+  
+  #####Beta diversity stats##### #ADONIS#
+library(vegan)
+metadata <- as(samples_data(ps_root), "Cycle")
+
+adonis(distance(ps_root, method="bray") ~ "Cycle",
+       data = metadata)
+
+bc <- phyloseq::distance(ps_geranium, "bray")
+adonis(bc ~ Leaf, data = samdf_NS)
+
+adonis(formula = bc ~ Run, data = samdf_NS) 
+
+
+## adonis test with vegan ##Cycle & Pathogen##
+ps_clean <- prune_taxa(!(taxa_names(ps_root) %in% "-1"), ps_root)
+ps_clean <- prune_taxa(taxa_sums(ps_clean) > 0.0, ps_clean)
+ps_clean <- transform_sample_counts(ps_clean, function(x) x/sum(x))
+ps_clean <- prune_samples(sample_sums(ps_clean) >= 0, ps_clean)
+df <- data.frame(sample_data(ps_clean))
+ps_clean_bray <- phyloseq::distance(ps_clean, method = "bray")
+adonis2(ps_clean_bray ~ Cycle, data = df)
+adonis2(ps_clean_bray ~ Pathogen, data = df)
+ps_clean_euc <- phyloseq::distance(ps_clean, method = "euclidean")
+adonis2(ps_clean_euc ~ Cycle, data = df)
+adonis2(ps_clean_euc ~ Pathogen, data = df)
+
+## adonis test with vegan ##Solution & Pathogen##
+ps_clean <- prune_taxa(!(taxa_names(ps_root) %in% "-1"), ps_root)
+ps_clean <- prune_taxa(taxa_sums(ps_clean) > 0.0, ps_clean)
+ps_clean <- transform_sample_counts(ps_clean, function(x) x/sum(x))
+ps_clean <- prune_samples(sample_sums(ps_clean) >= 0, ps_clean)
+df <- data.frame(sample_data(ps_clean))
+ps_clean_bray <- phyloseq::distance(ps_clean, method = "bray")
+adonis2(ps_clean_bray ~ Solution, data = df)
+adonis2(ps_clean_bray ~ Pathogen, data = df)
+ps_clean_euc <- phyloseq::distance(ps_clean, method = "euclidean")
+adonis2(ps_clean_euc ~ Solution, data = df)
+adonis2(ps_clean_euc ~ Pathogen, data = df)
+
+
+## adonis test with vegan ##Solution & Cycle##
+ps_clean <- prune_taxa(!(taxa_names(ps_root) %in% "-1"), ps_root)
+ps_clean <- prune_taxa(taxa_sums(ps_clean) > 0.0, ps_clean)
+ps_clean <- transform_sample_counts(ps_clean, function(x) x/sum(x))
+ps_clean <- prune_samples(sample_sums(ps_clean) >= 0, ps_clean)
+df <- data.frame(sample_data(ps_clean))
+
+ps_clean_bray <- phyloseq::distance(ps_clean, method = "bray")
+adonis2(ps_clean_bray ~ Pathogen*Solution, data = df)
+adonis2(ps_clean_bray ~ Cycle, data = df)
+
+ps_clean_euc <- phyloseq::distance(ps_clean, method = "euclidean")
+adonis2(ps_clean_euc ~ Solution, data = df)
+adonis2(ps_clean_euc ~ Cycle, data = df)
+
+
+
+## pcoa using your counts and including adonis p-values 
+ps_prop <- transform_sample_counts(ps_root, function(otu) otu/sum(otu))
+ps_prop <- prune_samples(sample_sums(ps_prop) >= 0, ps_prop)
+pcoa_euc <- ordinate(ps_prop, method="PCoA", distance="euclidean")
+pcoa_bray <- ordinate(ps_prop, method="PCoA", distance="bray")
+# pcoa_uni <- ordinate(ps_prop, method="PCoA", distance="unifrac") ## requires a tree
+# View(pcoa_bray$values)
+
+plot_ordination(ps_prop, pcoa_bray, color="Pathogen", shape = "Pathogen", title="Bray PCoA") +
+  theme_bw() + 
+  stat_ellipse() + 
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  scale_color_manual(values = wes_palette("FantasticFox1", n = 7, type = "continuous")) +
+  geom_hline(yintercept = 0, color = "lightgrey") +
+  geom_vline(xintercept = 0, color = "lightgrey")
+  
+  
+  
+plot_ordination(ps_prop, pcoa_euc, color="treatment", shape = "treatment", title="Euclidean PCoA (adonis: treatment p-value=0.049)") +
+  theme_bw() + geom_point(size=3) +
+  stat_ellipse() +  xlab("PC1 (64%)") + ylab("PC2 (18.4%)") +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  scale_color_manual(values = wes_palette("FantasticFox1", n = 3, type = "continuous")) +
+  geom_hline(yintercept = 0, color = "lightgrey") +
+  geom_vline(xintercept = 0, color = "lightgrey")
+  
+  
+  
+  plot_ordination(ps_prop, pcoa_euc, color="stage", shape = "treatment", title="Euclidean PCoA (adonis: treatment p-value=0.049; stage p-value=0.006)") +
+  theme_bw() + 
+  stat_ellipse() + 
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  scale_color_manual(values = wes_palette("FantasticFox1", n = 3, type = "continuous")) +
+  geom_hline(yintercept = 0, color = "lightgrey") +
+  geom_vline(xintercept = 0, color = "lightgrey")
+  
+  
+  plot_ordination(ps.prop_its, ord.pcoa.bray_its, color= "Production.Stage", shape="treatment") +
+  geom_point(size=3) +
+  scale_color_manual (values = wes_palette("Darjeeling2", n = 12, type = "continuous")) +
+  theme(legend.title=element_blank()) +
+  xlab("PC1 (50.7%)") + ylab("PC2 (23%)") +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+  
+
+## text is from an adonis test and the pc % from the ordination object (left in case you wanted to add)
+## you can add any other ggplot lines that you want
+
+
+###MORE ORDINATION PLOTS, ALL COMBINATIONS###
+###Solution and Pathogen###
+
+{r nmds, fig.height=4, fig.width=5}
+
+ps_prop <- transform_sample_counts(ps_root, function(otu) otu/sum(otu))
+ps_prop <- prune_samples(sample_sums(ps_prop) >= 0, ps_prop)
+pcoa_euc <- ordinate(ps_prop, method="PCoA", distance="euclidean")
+pcoa_bray <- ordinate(ps_prop, method="PCoA", distance="bray")
+nmds_euc <- ordinate(ps_prop, method="NMDS", distance="euclidean")
+nmds_bray <- ordinate(ps_prop, method="NMDS", distance="bray")
+
+###Solution & Pathogen###
+
+pb <- plot_ordination(ps_prop, pcoa_bray, color="Solution", shape = "Pathogen", title="Bray PCoA") + geom_point(size=3) +
+  theme_bw() + 
+  stat_ellipse() + 
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  scale_color_manual(values = wes_palette("FantasticFox1", n = 3, type = "continuous")) +
+  geom_hline(yintercept = 0, color = "lightgrey") +
+  geom_vline(xintercept = 0, color = "lightgrey")
+
+pe <- plot_ordination(ps_prop, pcoa_euc, color="Solution", shape = "Pathogen", title="Euclidean PCoA") + geom_point(size=3) +
+  theme_bw() + 
+  stat_ellipse() + 
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  scale_color_manual(values = wes_palette("FantasticFox1", n = 3, type = "continuous")) +
+  geom_hline(yintercept = 0, color = "lightgrey") +
+  geom_vline(xintercept = 0, color = "lightgrey")
+  
+
+nb <- plot_ordination(ps_prop, nmds_bray, color="Solution", shape = "Pathogen", title="Bray NMDS") + geom_point(size=3) +
+  theme_bw() + 
+  stat_ellipse() + 
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  scale_color_manual(values = wes_palette("FantasticFox1", n = 3, type = "continuous")) +
+  geom_hline(yintercept = 0, color = "lightgrey") +
+  geom_vline(xintercept = 0, color = "lightgrey")
+
+
+ne <- plot_ordination(ps_prop, nmds_euc, color="Solution", shape = "Pathogen", title="Euclidean NMDS") + geom_point(size=3) +
+  theme_bw() + 
+  stat_ellipse() + 
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  scale_color_manual(values = wes_palette("FantasticFox1", n = 3, type = "continuous")) +
+  geom_hline(yintercept = 0, color = "lightgrey") +
+  geom_vline(xintercept = 0, color = "lightgrey")
+
+
+cowplot::plot_grid(pb, nb, pe, ne)
+
+###Solution & Cycle###
+
+pb <- plot_ordination(ps_prop, pcoa_bray, color="Cycle", shape = "Solution", title="Bray PCoA") + geom_point(size=3) +
+  theme_bw() + 
+  stat_ellipse() + 
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  scale_color_manual(values = wes_palette("FantasticFox1", n = 6, type = "continuous")) +
+  geom_hline(yintercept = 0, color = "lightgrey") +
+  geom_vline(xintercept = 0, color = "lightgrey")
+
+pe <- plot_ordination(ps_prop, pcoa_euc, color="Cycle", shape = "Solution", title="Euclidean PCoA") + geom_point(size=3) +
+  theme_bw() + 
+  stat_ellipse() + 
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  scale_color_manual(values = wes_palette("FantasticFox1", n = 6, type = "continuous")) +
+  geom_hline(yintercept = 0, color = "lightgrey") +
+  geom_vline(xintercept = 0, color = "lightgrey")
+  
+
+nb <- plot_ordination(ps_prop, nmds_bray, color="Cycle", shape = "Solution", title="Bray NMDS") + geom_point(size=3) +
+  theme_bw() + 
+  stat_ellipse() + 
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  scale_color_manual(values = wes_palette("FantasticFox1", n = 6, type = "continuous")) +
+  geom_hline(yintercept = 0, color = "lightgrey") +
+  geom_vline(xintercept = 0, color = "lightgrey")
+
+
+ne <- plot_ordination(ps_prop, nmds_euc, color="Cycle", shape = "Solution", title="Euclidean NMDS") + geom_point(size=3) +
+  theme_bw() + 
+  stat_ellipse() + 
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  scale_color_manual(values = wes_palette("FantasticFox1", n = 6, type = "continuous")) +
+  geom_hline(yintercept = 0, color = "lightgrey") +
+  geom_vline(xintercept = 0, color = "lightgrey")
+
+
+cowplot::plot_grid(pb, nb, pe, ne)
+
+
+###Cycle & Pathogen###
+
+pb <- plot_ordination(ps_prop, pcoa_bray, color="Cycle", shape = "Pathogen", title="Bray PCoA") + geom_point(size=3) +
+  theme_bw() + 
+  stat_ellipse() + 
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  scale_color_manual(values = wes_palette("Cavalcanti1", n = 6, type = "continuous")) +
+  geom_hline(yintercept = 0, color = "lightgrey") +
+  geom_vline(xintercept = 0, color = "lightgrey")
+
+pe <- plot_ordination(ps_prop, pcoa_euc, color="Cycle", shape = "Pathogen", title="Euclidean PCoA") + geom_point(size=3) +
+  theme_bw() + 
+  stat_ellipse() + 
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  scale_color_manual(values = wes_palette("Cavalcanti1", n = 6, type = "continuous")) +
+  geom_hline(yintercept = 0, color = "lightgrey") +
+  geom_vline(xintercept = 0, color = "lightgrey")
+  
+
+nb <- plot_ordination(ps_prop, nmds_bray, color="Cycle", shape = "Pathogen", title="Bray NMDS") + geom_point(size=3) +
+  theme_bw() + 
+  stat_ellipse() + 
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  scale_color_manual(values = wes_palette("Cavalcanti1", n = 6, type = "continuous")) +
+  geom_hline(yintercept = 0, color = "lightgrey") +
+  geom_vline(xintercept = 0, color = "lightgrey")
+
+
+ne <- plot_ordination(ps_prop, nmds_euc, color="Cycle", shape = "Pathogen", title="Euclidean NMDS") + geom_point(size=3) +
+  theme_bw() + 
+  stat_ellipse() + 
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  scale_color_manual(values = wes_palette("Cavalcanti1", n = 6, type = "continuous")) +
+  geom_hline(yintercept = 0, color = "lightgrey") +
+  geom_vline(xintercept = 0, color = "lightgrey")
+
+
+cowplot::plot_grid(pb, nb, pe, ne)
+
+
+###Pathogen###
+
+pb <- plot_ordination(ps_prop, pcoa_bray, color="Pathogen", title="Bray PCoA") + geom_point(size=3) +
+  theme_bw() + 
+  stat_ellipse() + 
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  scale_color_manual(values = wes_palette("Cavalcanti1", n = 2, type = "continuous")) +
+  geom_hline(yintercept = 0, color = "lightgrey") +
+  geom_vline(xintercept = 0, color = "lightgrey")
+
+pe <- plot_ordination(ps_prop, pcoa_euc, color="Pathogen", title="Euclidean PCoA") + geom_point(size=3) +
+  theme_bw() + 
+  stat_ellipse() + 
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  scale_color_manual(values = wes_palette("Cavalcanti1", n = 2, type = "continuous")) +
+  geom_hline(yintercept = 0, color = "lightgrey") +
+  geom_vline(xintercept = 0, color = "lightgrey")
+  
+
+
+```{r nmds, fig.height=8, fig.width=5}
+pcoa_uni <- ordinate(ps_root, method="PCoA", distance="unifrac")
+pcoa_wuni <- ordinate(ps_root, method="PCoA", distance="wunifrac")
+nmds_uni <- ordinate(ps_root, method="NMDS", distance="unifrac")
+nmds_wuni <- ordinate(ps_root, method="NMDS", distance="wunifrac")
+
+###title="Unifrac NMDS"###
+
+  
+tiff("Root_NMDS_7x5_Cycle.tiff", units="in", width=7, height=5, res=300)
+plot_ordination(ps_prop, nmds_uni, color="Cycle") + geom_point(size=5) + 
+  theme_bw() + 
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  scale_color_manual(values = my.colors6)
+  dev.off()
+  
+tiff("Root_NMDS_7x5_Pathogen.tiff", units="in", width=7, height=5, res=300)
+plot_ordination(ps_prop, nmds_uni, color="Pathogen") + geom_point(size=5) + 
+  theme_bw() + 
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  scale_color_manual(values = my.colors2)
+  dev.off()  
+
+tiff("Root_NMDS_7x5_Solution_.tiff", units="in", width=7, height=5, res=300)
+plot_ordination(ps_prop, nmds_uni, color="Solution") + geom_point(size=5) + theme_bw() + 
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  scale_color_manual(values = my.colors3)
+dev.off()
+
+my.colors3 <- colorRampPalette(c('darkred', 'seagreen', 'dodgerblue'))(3)
+my.colors2 <- colorRampPalette(c('darkorange2', 'steelblue4'))(2)
+  
+  
+  ###By Pathogen##
+plot_ordination(ps_prop, nmds_uni, color="Pathogen") + geom_point(size=5) + theme(legend.title=element_blank()) +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  scale_color_manual(values = wes_palette("Darjeeling2", n = 2, type = "continuous")) 
+  
+   
+   plot_ordination(ps_prop, nmds_uni, color="Cycle", shape="Pathogen") + geom_point(size=5) + 
+  theme_bw() + 
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  scale_color_manual(values = my.colors4)
+  
+   
+  my.colors4 <- colorRampPalette(c('rosybrown3', 'skyblue3','darkseagreen4', 'wheat3', 'darkslategray4','gray25'))(6)
+  
+   
+   my.colors3 <- colorRampPalette(c('steelblue4','indianred3', 'wheat3'))(3)  
+  
+  my.colors2 <- colorRampPalette(c('steelblue4','indianred3'))(2)  
+   
+  my.colors <- colorRampPalette(c('khaki3', 'steelblue4','coral3', 'gray69', 'darkslategray4','gray25'))(6)
+    
+  
+  ###Bray NMDS##
+plot_ordination(ps_prop, nmds_bray, color="Pathogen", title="Bray NMDS") + geom_point(size=5) +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  scale_color_manual(values = wes_palette("Darjeeling2", n = 6, type = "continuous")) +  theme(legend.title=element_blank())
+  
+  
+  ###Bray NMDS##
+tiff("Root_NMDS_7x5_Pathogen.tiff", units="in", width=6, height=5, res=300)
+plot_ordination(ps_prop, nmds_bray, color="Cycle", title="Bray NMDS") + geom_point(size=5) +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  scale_color_manual(values = wes_palette("Darjeeling2", n = 6, type = "continuous")) +  theme(legend.title=element_blank())
+
+  
+###title="Weighted Unifrac NMDS"###
+
+plot_ordination(ps_prop, nmds_wuni, color="Production.Stage", shape = "treatment") + geom_point(size=5) + theme(legend.title=element_blank()) +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  scale_color_manual(values = wes_palette("Darjeeling2", n = 12, type = "continuous"))
+
+##END OF ORDINATION PLOTS##
